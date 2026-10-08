@@ -1,0 +1,1130 @@
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local TS = game:GetService("TweenService")
+local RS = game:GetService("RunService")
+
+local LP = Players.LocalPlayer
+
+local rgb = Color3.fromRGB
+local udim = UDim2.new
+local offset = UDim2.fromOffset
+
+local white = Color3.new(1, 1, 1)
+local inkCol = rgb(30, 30, 36)
+local bgCol = rgb(255, 255, 255)
+local lineCol = rgb(210, 210, 218)
+local accent = rgb(149, 92, 215)
+local offCol = rgb(205, 205, 212)
+
+local cartoon = Enum.Font.FredokaOne
+local fast = TweenInfo.new(0.15)
+local popTi = TweenInfo.new(
+	0.3,
+	Enum.EasingStyle.Quint,
+	Enum.EasingDirection.Out
+)
+
+-- ESP COLORS
+local espColor = rgb(255, 0, 0)
+
+-- Visibility colors
+local visibleColor = rgb(0, 255, 0)
+local hiddenColor = rgb(255, 0, 0)
+
+-- States
+local isOn = false
+local hlOn = true
+
+local isOpen = true
+local curTab = "main"
+
+local espData = {}
+local playerConns = {}
+
+local addConn
+local remConn
+local teamConn
+local visibilityConn
+local visibilityTimer = 0
+local VISIBILITY_INTERVAL = 0.12
+local moveConn
+local endConn
+
+local onMove
+local held
+
+--==================================================
+-- DRAGGING
+--==================================================
+
+local function isPress(i)
+	return i.UserInputType == Enum.UserInputType.MouseButton1
+		or i.UserInputType == Enum.UserInputType.Touch
+end
+
+local function startDrag(i, fn)
+	held = i
+
+	onMove = function(m)
+		if m == i or m.UserInputType == Enum.UserInputType.MouseMovement then
+			fn(m)
+		end
+	end
+end
+
+moveConn = UIS.InputChanged:Connect(function(m)
+	if onMove
+		and (
+			m.UserInputType == Enum.UserInputType.MouseMovement
+			or m.UserInputType == Enum.UserInputType.Touch
+		)
+	then
+		onMove(m)
+	end
+end)
+
+endConn = UIS.InputEnded:Connect(function(i)
+	if held
+		and (
+			i == held
+			or (
+				i.UserInputType == Enum.UserInputType.MouseButton1
+				and held.UserInputType == Enum.UserInputType.MouseButton1
+			)
+		)
+	then
+		onMove = nil
+		held = nil
+	end
+end)
+
+--==================================================
+-- UI HELPERS
+--==================================================
+
+local function make(class, props, par)
+	local o = Instance.new(class)
+
+	for k, val in props do
+		o[k] = val
+	end
+
+	o.Parent = par
+	return o
+end
+
+local function corner(o, a, b)
+	make("UICorner", {
+		CornerRadius = UDim.new(a, b or 0)
+	}, o)
+end
+
+local function stroke(o, c, t, tr)
+	return make("UIStroke", {
+		Color = c,
+		Thickness = t or 1,
+		Transparency = tr or 0
+	}, o)
+end
+
+local function makeToggle(par, pos)
+	local b = make("TextButton", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Size = offset(44, 22),
+		Position = pos,
+		BackgroundColor3 = offCol,
+		Text = "",
+		AutoButtonColor = false,
+		BorderSizePixel = 0
+	}, par)
+
+	local k = make("Frame", {
+		Size = offset(16, 16),
+		Position = udim(0, 3, 0.5, -8),
+		BackgroundColor3 = white,
+		BorderSizePixel = 0
+	}, b)
+
+	corner(b, 1)
+	corner(k, 1)
+
+	return b, k
+end
+
+local function skin(b, k, state, instant)
+	local col = state and accent or offCol
+	local pos = state
+		and udim(1, -19, 0.5, -8)
+		or udim(0, 3, 0.5, -8)
+
+	if instant then
+		b.BackgroundColor3 = col
+		k.Position = pos
+	else
+		TS:Create(b, fast, {
+			BackgroundColor3 = col
+		}):Play()
+
+		TS:Create(k, fast, {
+			Position = pos
+		}):Play()
+	end
+end
+
+local function rowLabel(par, txt, pos)
+	return make("TextLabel", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Size = offset(110, 22),
+		Position = pos,
+		BackgroundTransparency = 1,
+		Text = txt,
+		Font = cartoon,
+		TextSize = 14,
+		TextColor3 = rgb(50, 50, 58),
+		TextXAlignment = Enum.TextXAlignment.Left
+	}, par)
+end
+
+--==================================================
+-- GUI
+--==================================================
+
+local gui = make("ScreenGui", {
+	Name = "ESPUI",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	DisplayOrder = 999,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+})
+
+local idkFolder = make("Folder", {}, gui)
+
+local frame = make("Frame", {
+	Size = offset(190, 138),
+	Position = udim(0.5, -95, 0.35, 0),
+	BackgroundColor3 = bgCol,
+	BorderSizePixel = 0,
+	Visible = false
+}, gui)
+
+local head = make("Frame", {
+	Size = udim(1, -64, 0, 30),
+	BackgroundTransparency = 1
+}, frame)
+
+local content = make("Frame", {
+	Size = udim(1, 0, 1, -30),
+	Position = offset(0, 30),
+	BackgroundTransparency = 1
+}, frame)
+
+local tabRow = make("Frame", {
+	Size = udim(1, 0, 0, 26),
+	BackgroundTransparency = 1
+}, content)
+
+local tabMain = make("TextButton", {
+	Size = offset(84, 22),
+	Position = offset(10, 2),
+	BackgroundColor3 = accent,
+	Text = "main",
+	Font = cartoon,
+	TextSize = 13,
+	TextColor3 = white,
+	AutoButtonColor = false,
+	BorderSizePixel = 0
+}, tabRow)
+
+local tabSet = make("TextButton", {
+	Size = offset(84, 22),
+	Position = offset(96, 2),
+	BackgroundColor3 = rgb(238, 238, 243),
+	Text = "settings",
+	Font = cartoon,
+	TextSize = 13,
+	TextColor3 = rgb(90, 90, 100),
+	AutoButtonColor = false,
+	BorderSizePixel = 0
+}, tabRow)
+
+local mainBody = make("Frame", {
+	Size = udim(1, 0, 0, 80),
+	Position = offset(0, 28),
+	BackgroundTransparency = 1
+}, content)
+
+local setBody = make("Frame", {
+	Size = udim(1, 0, 0, 80),
+	Position = offset(0, 28),
+	BackgroundTransparency = 1,
+	Visible = false
+}, content)
+
+--==================================================
+-- ONLY THE FEATURES WE KEEP
+--==================================================
+
+local toggleBtn, knob = makeToggle(
+	mainBody,
+	udim(0, 96, 0, 20)
+)
+
+local hlBtn, hlKnob = makeToggle(
+	setBody,
+	udim(1, -58, 0, 20)
+)
+
+rowLabel(
+	mainBody,
+	"Player ESP",
+	udim(0, 14, 0, 20)
+)
+
+rowLabel(
+	setBody,
+	"Highlight",
+	udim(0, 14, 0, 20)
+)
+
+--==================================================
+-- HEADER
+--==================================================
+
+corner(frame, 0, 10)
+stroke(frame, lineCol)
+
+corner(tabMain, 0, 8)
+corner(tabSet, 0, 8)
+
+make("TextLabel", {
+	Size = udim(1, -12, 1, 0),
+	Position = offset(12, 0),
+	BackgroundTransparency = 1,
+	Text = "simple lil esp",
+	Font = cartoon,
+	TextSize = 16,
+	TextColor3 = inkCol,
+	TextXAlignment = Enum.TextXAlignment.Left
+}, head)
+
+local function circleBtn(txt, x, size)
+	local b = make("TextButton", {
+		Size = offset(24, 24),
+		Position = udim(1, x, 0, 3),
+		BackgroundColor3 = rgb(238, 238, 243),
+		Text = txt,
+		Font = cartoon,
+		TextSize = size,
+		TextColor3 = rgb(60, 60, 70),
+		BorderSizePixel = 0
+	}, frame)
+
+	corner(b, 1)
+
+	return b
+end
+
+local minimizeBtn, closeBtn =
+	circleBtn("-", -56, 16),
+	circleBtn("x", -28, 14)
+
+--==================================================
+-- COLOR PICKER
+--==================================================
+
+local function makePicker(par, pos, startColor, onChange)
+	local api = {}
+
+	local h, s, v = startColor:ToHSV()
+	local color = startColor
+	local open = false
+	local queued = false
+
+	local swatch = make("TextButton", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Size = offset(26, 26),
+		Position = pos,
+		BackgroundColor3 = color,
+		Text = "",
+		AutoButtonColor = false,
+		BorderSizePixel = 0
+	}, par)
+
+	local pop = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Size = offset(190, 196),
+		Position = udim(0.5, 0, 1, 6),
+		BackgroundColor3 = bgCol,
+		BorderSizePixel = 0,
+		Visible = false
+	}, frame)
+
+	local popBase = stroke(pop, rgb(225, 225, 232), 2)
+	local popStroke = stroke(pop, white, 2)
+
+	local popGrad = make("UIGradient", {
+		Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.25, 0.5),
+			NumberSequenceKeypoint.new(0.48, 0),
+			NumberSequenceKeypoint.new(0.5, 1),
+			NumberSequenceKeypoint.new(0.75, 0.5),
+			NumberSequenceKeypoint.new(0.98, 0),
+			NumberSequenceKeypoint.new(1, 1)
+		})
+	}, popStroke)
+
+	local popScale = make("UIScale", {}, pop)
+
+	local svBox = make("Frame", {
+		Size = offset(170, 96),
+		Position = offset(10, 10),
+		BackgroundColor3 = white,
+		BorderSizePixel = 0,
+		Active = true
+	}, pop)
+
+	local svGrad = make("UIGradient", {}, svBox)
+
+	local darkOverlay = make("Frame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BorderSizePixel = 0,
+		ZIndex = 2
+	}, svBox)
+
+	local hueSlider = make("Frame", {
+		Size = offset(170, 20),
+		Position = offset(10, 112),
+		BackgroundTransparency = 1,
+		Active = true
+	}, pop)
+
+	local hueBar = make("Frame", {
+		Size = udim(1, 0, 0, 10),
+		Position = udim(0, 0, 0.5, -5),
+		BackgroundColor3 = white,
+		BorderSizePixel = 0
+	}, hueSlider)
+
+	local previewDot = make("Frame", {
+		Size = offset(24, 24),
+		Position = offset(10, 162),
+		BackgroundColor3 = color,
+		BorderSizePixel = 0
+	}, pop)
+
+	local rgbInput = make("TextBox", {
+		Size = offset(130, 24),
+		Position = offset(50, 162),
+		BackgroundColor3 = rgb(238, 238, 243),
+		BorderSizePixel = 0,
+		Font = cartoon,
+		TextSize = 13,
+		TextColor3 = inkCol,
+		PlaceholderText = "255, 0, 0",
+		PlaceholderColor3 = rgb(150, 150, 160),
+		ClearTextOnFocus = false,
+		Text = "255, 0, 0"
+	}, pop)
+
+	local function makeKnob(par, z, col)
+		local k = make("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Size = offset(16, 16),
+			BackgroundColor3 = col,
+			BorderSizePixel = 0,
+			ZIndex = z
+		}, par)
+
+		corner(k, 1)
+		stroke(k, inkCol, 2.5)
+
+		return k
+	end
+
+	local svKnob = makeKnob(svBox, 3, color)
+	local hueKnob = makeKnob(hueSlider, 2, color)
+
+	local inputStroke = stroke(
+		rgbInput,
+		lineCol,
+		1.5
+	)
+
+	make("UIGradient", {
+		Transparency = NumberSequence.new(1, 0),
+		Rotation = 90
+	}, darkOverlay)
+
+	make("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, rgb(255, 0, 0)),
+			ColorSequenceKeypoint.new(1 / 6, rgb(255, 255, 0)),
+			ColorSequenceKeypoint.new(2 / 6, rgb(0, 255, 0)),
+			ColorSequenceKeypoint.new(3 / 6, rgb(0, 255, 255)),
+			ColorSequenceKeypoint.new(4 / 6, rgb(0, 0, 255)),
+			ColorSequenceKeypoint.new(5 / 6, rgb(255, 0, 255)),
+			ColorSequenceKeypoint.new(1, rgb(255, 0, 0))
+		})
+	}, hueBar)
+
+	corner(swatch, 0, 8)
+	stroke(swatch, inkCol, 1.5, 0.6)
+	corner(pop, 0, 12)
+	corner(svBox, 0, 8)
+	corner(darkOverlay, 0, 8)
+	corner(hueBar, 1)
+	corner(previewDot, 1)
+	stroke(previewDot, inkCol, 1, 0.6)
+	corner(rgbInput, 0, 8)
+
+	local function paint()
+		color = Color3.fromHSV(h, s, v)
+
+		swatch.BackgroundColor3 = color
+		previewDot.BackgroundColor3 = color
+		svKnob.BackgroundColor3 = color
+		hueKnob.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+
+		svGrad.Color = ColorSequence.new(
+			white,
+			Color3.fromHSV(h, 1, 1)
+		)
+
+		popGrad.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, accent),
+			ColorSequenceKeypoint.new(0.48, color),
+			ColorSequenceKeypoint.new(0.5, accent),
+			ColorSequenceKeypoint.new(0.98, color),
+			ColorSequenceKeypoint.new(1, accent)
+		})
+
+		svKnob.Position = UDim2.fromScale(s, 1 - v)
+		hueKnob.Position = UDim2.fromScale(h, 0.5)
+
+		rgbInput.Text = string.format(
+			"%d, %d, %d",
+			math.round(color.R * 255),
+			math.round(color.G * 255),
+			math.round(color.B * 255)
+		)
+	end
+
+	local function changed()
+		if queued then
+			return
+		end
+
+		queued = true
+
+		task.defer(function()
+			queued = false
+			paint()
+			onChange(color)
+		end)
+	end
+
+	local presetColors = {
+		rgb(255, 0, 0),
+		rgb(255, 140, 0),
+		rgb(255, 230, 0),
+		rgb(0, 255, 120),
+		rgb(0, 220, 255),
+		rgb(60, 100, 255),
+		rgb(149, 92, 215),
+		rgb(30, 30, 36)
+	}
+
+	for i, c in presetColors do
+		local chip = make("TextButton", {
+			Size = offset(16, 16),
+			Position = offset(10 + (i - 1) * 22, 138),
+			BackgroundColor3 = c,
+			Text = "",
+			AutoButtonColor = false,
+			BorderSizePixel = 0
+		}, pop)
+
+		corner(chip, 1)
+		stroke(chip, inkCol, 1, 0.6)
+
+		chip.Activated:Connect(function()
+			h, s, v = c:ToHSV()
+			changed()
+		end)
+	end
+
+	local function updateSlider(i, name)
+		if name == "sv" then
+			s = math.clamp(
+				(i.Position.X - svBox.AbsolutePosition.X)
+					/ svBox.AbsoluteSize.X,
+				0,
+				1
+			)
+
+			v = 1 - math.clamp(
+				(i.Position.Y - svBox.AbsolutePosition.Y)
+					/ svBox.AbsoluteSize.Y,
+				0,
+				1
+			)
+		else
+			h = math.clamp(
+				(i.Position.X - hueSlider.AbsolutePosition.X)
+					/ hueSlider.AbsoluteSize.X,
+				0,
+				0.999
+			)
+		end
+
+		changed()
+	end
+
+	local function bindSlider(fr, name)
+		fr.InputBegan:Connect(function(i)
+			if not isPress(i) then
+				return
+			end
+
+			updateSlider(i, name)
+
+			startDrag(i, function(m)
+				updateSlider(m, name)
+			end)
+		end)
+	end
+
+	bindSlider(svBox, "sv")
+	bindSlider(hueSlider, "hue")
+
+	rgbInput.Focused:Connect(function()
+		TS:Create(inputStroke, fast, {
+			Color = accent
+		}):Play()
+	end)
+
+	rgbInput.FocusLost:Connect(function()
+		TS:Create(inputStroke, fast, {
+			Color = lineCol
+		}):Play()
+
+		local r, g, b = rgbInput.Text:match(
+			"(%d+)%D+(%d+)%D+(%d+)"
+		)
+
+		if r then
+			h, s, v = rgb(
+				math.clamp(tonumber(r), 0, 255),
+				math.clamp(tonumber(g), 0, 255),
+				math.clamp(tonumber(b), 0, 255)
+			):ToHSV()
+		end
+
+		changed()
+	end)
+
+	local function setOpen(state)
+		open = state
+
+		if state then
+			pop.Visible = true
+			popScale.Scale = 0.9
+			pop.Position = udim(0.5, 0, 1, -4)
+			popStroke.Transparency = 1
+			popBase.Transparency = 1
+			popGrad.Rotation = 0
+
+			TS:Create(popScale, popTi, {
+				Scale = 1
+			}):Play()
+
+			TS:Create(pop, popTi, {
+				Position = udim(0.5, 0, 1, 6)
+			}):Play()
+
+			TS:Create(popStroke, popTi, {
+				Transparency = 0
+			}):Play()
+
+			TS:Create(popBase, popTi, {
+				Transparency = 0
+			}):Play()
+		else
+			pop.Visible = false
+		end
+	end
+
+	swatch.Activated:Connect(function()
+		setOpen(not open)
+	end)
+
+	api.close = function()
+		setOpen(false)
+	end
+
+	paint()
+
+	return api
+end
+
+local mainPicker = makePicker(
+	mainBody,
+	udim(0, 148, 0, 20),
+	espColor,
+	function(c)
+		espColor = c
+	end
+)
+
+--==================================================
+-- PICKER MANAGEMENT
+--==================================================
+
+local function closePicker()
+	mainPicker.close()
+end
+
+--==================================================
+-- TAB SYSTEM
+--==================================================
+
+local function paintTab(b, active)
+	TS:Create(b, fast, {
+		BackgroundColor3 = active
+			and accent
+			or rgb(238, 238, 243),
+
+		TextColor3 = active
+			and white
+			or rgb(90, 90, 100)
+	}):Play()
+end
+
+local function showTab(name)
+	curTab = name
+
+	mainBody.Visible = name == "main"
+	setBody.Visible = name == "settings"
+
+	closePicker()
+
+	paintTab(tabMain, name == "main")
+	paintTab(tabSet, name == "settings")
+end
+
+--==================================================
+-- ESP
+--==================================================
+
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+rayParams.IgnoreWater = true
+
+local function isPlayerVisible(player, d)
+	if player == LP or player.Team == LP.Team then
+		return false
+	end
+	if not d
+		or not d.char
+		or not d.char.Parent
+	then
+		return false
+	end
+
+	local camera = workspace.CurrentCamera
+
+	if not camera then
+		return false
+	end
+
+	local target = d.hd
+
+	if not target or not target.Parent then
+		target = d.root
+	end
+
+	if not target or not target.Parent then
+		return false
+	end
+
+	local origin = camera.CFrame.Position
+	local direction = target.Position - origin
+
+	if direction.Magnitude <= 0 then
+		return true
+	end
+
+	rayParams.FilterDescendantsInstances = { LP.Character }
+
+	local result = workspace:Raycast(
+		origin,
+		direction,
+		rayParams
+	)
+
+	if not result then
+		return true
+	end
+
+	if result.Instance:IsDescendantOf(d.char) then
+		return true
+	end
+
+	return false
+end
+
+--==================================================
+-- RED / GREEN HIGHLIGHT
+--==================================================
+
+local function updateHighlightVisibility()
+	if not isOn or not hlOn then
+		return
+	end
+
+	for player, d in espData do
+		if d.hl then
+			if player.Team == LP.Team then
+				d.hl:Destroy()
+				d.hl = nil
+			else
+				local visible = isPlayerVisible(player, d)
+				local color = visible and visibleColor or hiddenColor
+
+				if d.hl.FillColor ~= color then
+					d.hl.FillColor = color
+					d.hl.OutlineColor = color
+				end
+			end
+		end
+	end
+end
+
+--==================================================
+-- CREATE / REMOVE HIGHLIGHT
+--==================================================
+
+local function sync(player)
+	local d = espData[player]
+
+	if not d then
+		return
+	end
+
+	if player == LP or player.Team == LP.Team then
+		if d.hl then
+			d.hl:Destroy()
+			d.hl = nil
+		end
+		return
+	end
+
+	if isOn and hlOn then
+		if not d.hl then
+			d.hl = make("Highlight", {
+				Adornee = d.char,
+				FillColor = hiddenColor,
+				OutlineColor = hiddenColor,
+				FillTransparency = 0.5,
+				DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+			}, idkFolder)
+		end
+	elseif d.hl then
+		d.hl:Destroy()
+		d.hl = nil
+	end
+end
+
+local function clearEsp(player)
+	local d = espData[player]
+
+	if d then
+		if d.hl then
+			d.hl:Destroy()
+		end
+
+		espData[player] = nil
+	end
+end
+
+--==================================================
+-- PLAYER SETUP
+--==================================================
+
+local function setup(player, char)
+	clearEsp(player)
+
+	local d = {
+		char = char
+	}
+
+	espData[player] = d
+
+	d.root = char:WaitForChild(
+		"HumanoidRootPart",
+		5
+	)
+
+	d.hd = char:WaitForChild(
+		"Head",
+		5
+	)
+
+	if espData[player] == d then
+		sync(player)
+	end
+end
+
+local function dropConns(player)
+	local connections = playerConns[player]
+
+	if connections then
+		for _, connection in connections do
+			connection:Disconnect()
+		end
+
+		playerConns[player] = nil
+	end
+end
+
+local function trackPlayer(player)
+	if player == LP then
+		return
+	end
+
+	playerConns[player] = {
+		player.CharacterAdded:Connect(function(char)
+			setup(player, char)
+		end),
+		player:GetPropertyChangedSignal("Team"):Connect(function()
+			sync(player)
+		end)
+	}
+
+	if player.Character then
+		task.spawn(
+			setup,
+			player,
+			player.Character
+		)
+	end
+end
+
+--==================================================
+-- ESP REFRESH
+--==================================================
+
+local function refresh()
+	if isOn then
+		if addConn then
+			for player in espData do
+				sync(player)
+			end
+		else
+			for _, player in Players:GetPlayers() do
+				trackPlayer(player)
+			end
+
+			addConn = Players.PlayerAdded:Connect(
+				trackPlayer
+			)
+
+			remConn = Players.PlayerRemoving:Connect(
+				function(player)
+					dropConns(player)
+					clearEsp(player)
+				end
+			)
+
+			teamConn = LP:GetPropertyChangedSignal("Team"):Connect(function()
+				for player in espData do
+					sync(player)
+				end
+				visibilityTimer = 0
+			end)
+		end
+	else
+		if addConn then
+			addConn:Disconnect()
+			addConn = nil
+		end
+
+		if remConn then
+			remConn:Disconnect()
+			remConn = nil
+		end
+
+		if teamConn then
+			teamConn:Disconnect()
+			teamConn = nil
+		end
+
+		for player in playerConns do
+			dropConns(player)
+		end
+
+		for player in espData do
+			clearEsp(player)
+		end
+	end
+
+	-- Visibility updater
+	if isOn and hlOn and not visibilityConn then
+		visibilityTimer = 0
+		visibilityConn = RS.Heartbeat:Connect(function(dt)
+			visibilityTimer += dt
+			if visibilityTimer >= VISIBILITY_INTERVAL then
+				visibilityTimer = 0
+				updateHighlightVisibility()
+			end
+		end)
+	elseif not (isOn and hlOn) and visibilityConn then
+		visibilityConn:Disconnect()
+		visibilityConn = nil
+		visibilityTimer = 0
+	end
+
+	if isOn and hlOn then
+		updateHighlightVisibility()
+	end
+end
+
+--==================================================
+-- BUTTONS
+--==================================================
+
+toggleBtn.Activated:Connect(function()
+	isOn = not isOn
+
+	skin(
+		toggleBtn,
+		knob,
+		isOn
+	)
+
+	refresh()
+end)
+
+hlBtn.Activated:Connect(function()
+	hlOn = not hlOn
+
+	skin(
+		hlBtn,
+		hlKnob,
+		hlOn
+	)
+
+	refresh()
+end)
+
+tabMain.Activated:Connect(function()
+	showTab("main")
+end)
+
+tabSet.Activated:Connect(function()
+	showTab("settings")
+end)
+
+--==================================================
+-- MINIMIZE
+--==================================================
+
+minimizeBtn.Activated:Connect(function()
+	isOpen = not isOpen
+
+	content.Visible = isOpen
+	closePicker()
+
+	TS:Create(frame, fast, {
+		Size = isOpen
+			and offset(190, 138)
+			or offset(190, 30)
+	}):Play()
+end)
+
+--==================================================
+-- CLOSE
+--==================================================
+
+closeBtn.Activated:Connect(function()
+	isOn = false
+
+	refresh()
+	closePicker()
+
+	if visibilityConn then
+		visibilityConn:Disconnect()
+		visibilityConn = nil
+	end
+
+	if moveConn then
+		moveConn:Disconnect()
+	end
+
+	if endConn then
+		endConn:Disconnect()
+	end
+
+	gui:Destroy()
+end)
+
+--==================================================
+-- DRAG UI
+--==================================================
+
+head.InputBegan:Connect(function(i)
+	if not isPress(i) then
+		return
+	end
+
+	local start = i.Position
+	local sp = frame.Position
+	local dragged = false
+
+	startDrag(i, function(m)
+		local d = m.Position - start
+
+		if not dragged and d.Magnitude >= 8 then
+			dragged = true
+		end
+
+		if dragged then
+			frame.Position = udim(
+				sp.X.Scale,
+				sp.X.Offset + d.X,
+				sp.Y.Scale,
+				sp.Y.Offset + d.Y
+			)
+		end
+	end)
+end)
+
+--==================================================
+-- INITIAL STATE
+--==================================================
+
+skin(
+	hlBtn,
+	hlKnob,
+	hlOn,
+	true
+)
+
+showTab("main")
+
+-- Parent GUI
+local ok = pcall(function()
+	local par = (gethui and gethui())
+		or game:GetService("CoreGui")
+
+	gui.Parent = par
+end)
+
+if not ok then
+	gui.Parent = LP:WaitForChild("PlayerGui")
+end
+
+-- Show UI
+frame.Visible = true
