@@ -2,69 +2,81 @@ local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local TS = game:GetService("TweenService")
 local RS = game:GetService("RunService")
-
 local LP = Players.LocalPlayer
 
-local rgb = Color3.fromRGB
-local udim = UDim2.new
-local offset = UDim2.fromOffset
-
+local rgb, udim, offset = Color3.fromRGB, UDim2.new, UDim2.fromOffset
 local white = Color3.new(1, 1, 1)
 local inkCol = rgb(30, 30, 36)
-local bgCol = rgb(255, 255, 255)
-local lineCol = rgb(210, 210, 218)
-local accent = rgb(149, 92, 215)
-local offCol = rgb(205, 205, 212)
-
+local bgCol, lineCol, accent, offCol = rgb(255, 255, 255), rgb(210, 210, 218), rgb(149, 92, 215), rgb(205, 205, 212)
 local cartoon = Enum.Font.FredokaOne
 local fast = TweenInfo.new(0.15)
+local popTi = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 
-local popTi = TweenInfo.new(
-	0.3,
-	Enum.EasingStyle.Quint,
-	Enum.EasingDirection.Out
-)
+local sizes = {
+	main = 138,
+	settings = 178
+}
 
---==================================================
--- ESP COLORS
---==================================================
+local pieceKeys = {
+	"hl",
+	"bb",
+	"boxGui",
+	"line"
+}
 
 local espColor = rgb(255, 0, 0)
+local teamColor = rgb(60, 100, 255)
 
--- Visible = GREEN
+-- Visibility colors
 local visibleColor = rgb(0, 255, 0)
-
--- Behind wall = RED
 local hiddenColor = rgb(255, 0, 0)
 
--- Only this team gets highlighted
+-- ONLY THIS TEAM GETS HIGHLIGHTED
 local TARGET_TEAM = "PACT"
 
---==================================================
--- STATES
---==================================================
+local isOn, hlOn, unOn, tnOn, boxOn, tracerOn, teamOn =
+	false, true, true, false, false, false, false
 
-local isOn = false
-local hlOn = true
+local isOpen, curTab = true, "main"
 
-local isOpen = true
-local curTab = "main"
+local espData, woahjConns, pickers = {}, {}, {}
 
-local espData = {}
-local playerConns = {}
-
-local addConn
-local remConn
+local addConn, remConn, lineConn, lpTeamConn
 local visibilityConn
-local moveConn
-local endConn
+local onMove, held
+local woahj
 
-local onMove
-local held
+local presetColors = {
+	rgb(255, 0, 0),
+	rgb(255, 140, 0),
+	rgb(255, 230, 0),
+	rgb(0, 255, 120),
+	rgb(0, 220, 255),
+	rgb(60, 100, 255),
+	rgb(149, 92, 215),
+	rgb(30, 30, 36)
+}
 
---==================================================
--- DRAGGING
---==================================================
+local moveConn = UIS.InputChanged:Connect(function(m)
+	if onMove and (
+		m.UserInputType == Enum.UserInputType.MouseMovement
+		or m.UserInputType == Enum.UserInputType.Touch
+	) then
+		onMove(m)
+	end
+end)
+
+local endConn = UIS.InputEnded:Connect(function(i)
+	if held and (
+		i == held
+		or (
+			i.UserInputType == Enum.UserInputType.MouseButton1
+			and held.UserInputType == Enum.UserInputType.MouseButton1
+		)
+	) then
+		onMove, held = nil, nil
+	end
+end)
 
 local function isPress(i)
 	return i.UserInputType == Enum.UserInputType.MouseButton1
@@ -80,36 +92,6 @@ local function startDrag(i, fn)
 		end
 	end
 end
-
-moveConn = UIS.InputChanged:Connect(function(m)
-	if onMove
-		and (
-			m.UserInputType == Enum.UserInputType.MouseMovement
-			or m.UserInputType == Enum.UserInputType.Touch
-		)
-	then
-		onMove(m)
-	end
-end)
-
-endConn = UIS.InputEnded:Connect(function(i)
-	if held
-		and (
-			i == held
-			or (
-				i.UserInputType == Enum.UserInputType.MouseButton1
-				and held.UserInputType == Enum.UserInputType.MouseButton1
-			)
-		)
-	then
-		onMove = nil
-		held = nil
-	end
-end)
-
---==================================================
--- UI HELPERS
---==================================================
 
 local function make(class, props, par)
 	local o = Instance.new(class)
@@ -162,7 +144,6 @@ end
 
 local function skin(b, k, state, instant)
 	local col = state and accent or offCol
-
 	local pos = state
 		and udim(1, -19, 0.5, -8)
 		or udim(0, 3, 0.5, -8)
@@ -184,7 +165,7 @@ end
 local function rowLabel(par, txt, pos)
 	return make("TextLabel", {
 		AnchorPoint = Vector2.new(0, 0.5),
-		Size = offset(110, 22),
+		Size = offset(80, 22),
 		Position = pos,
 		BackgroundTransparency = 1,
 		Text = txt,
@@ -195,9 +176,32 @@ local function rowLabel(par, txt, pos)
 	}, par)
 end
 
---==================================================
--- GUI
---==================================================
+local function makeKnob(par, z, col)
+	local k = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Size = offset(16, 16),
+		BackgroundColor3 = col,
+		BorderSizePixel = 0,
+		ZIndex = z
+	}, par)
+
+	corner(k, 1)
+	stroke(k, inkCol, 2.5)
+
+	return k
+end
+
+local function colorFor(player)
+	if teamOn and player.Team ~= LP.Team then
+		return teamColor
+	end
+
+	return espColor
+end
+
+local function teamText(player)
+	return player.Team and player.Team.Name or "No team"
+end
 
 local gui = make("ScreenGui", {
 	Name = "ESPUI",
@@ -207,10 +211,18 @@ local gui = make("ScreenGui", {
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 })
 
+local tracerGui = make("ScreenGui", {
+	Name = "ESPLines",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	DisplayOrder = 998,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+})
+
 local idkFolder = make("Folder", {}, gui)
 
 local frame = make("Frame", {
-	Size = offset(190, 138),
+	Size = offset(190, sizes.main),
 	Position = udim(0.5, -95, 0.35, 0),
 	BackgroundColor3 = bgCol,
 	BorderSizePixel = 0,
@@ -263,20 +275,27 @@ local mainBody = make("Frame", {
 	BackgroundTransparency = 1
 }, content)
 
-local setBody = make("Frame", {
-	Size = udim(1, 0, 0, 80),
+local setBody = make("ScrollingFrame", {
+	Size = udim(1, 0, 0, 120),
 	Position = offset(0, 28),
 	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	CanvasSize = offset(0, 200),
+	ScrollBarThickness = 3,
+	ScrollBarImageColor3 = rgb(190, 190, 200),
+	ScrollingDirection = Enum.ScrollingDirection.Y,
+	Active = true,
 	Visible = false
 }, content)
-
---==================================================
--- FEATURES
---==================================================
 
 local toggleBtn, knob = makeToggle(
 	mainBody,
 	udim(0, 96, 0, 20)
+)
+
+local teamBtn, teamKnob = makeToggle(
+	mainBody,
+	udim(0, 96, 0, 60)
 )
 
 local hlBtn, hlKnob = makeToggle(
@@ -284,38 +303,72 @@ local hlBtn, hlKnob = makeToggle(
 	udim(1, -58, 0, 20)
 )
 
-rowLabel(
-	mainBody,
-	"Player ESP",
-	udim(0, 14, 0, 20)
-)
-
-rowLabel(
+local unBtn, unKnob = makeToggle(
 	setBody,
-	"Highlight",
-	udim(0, 14, 0, 20)
+	udim(1, -58, 0, 60)
 )
 
---==================================================
--- HEADER
---==================================================
+local tnBtn, tnKnob = makeToggle(
+	setBody,
+	udim(1, -58, 0, 100)
+)
 
-corner(frame, 0, 10)
-stroke(frame, lineCol)
+local boxBtn, boxKnob = makeToggle(
+	setBody,
+	udim(1, -58, 0, 140)
+)
 
-corner(tabMain, 0, 8)
-corner(tabSet, 0, 8)
+local trBtn, trKnob = makeToggle(
+	setBody,
+	udim(1, -58, 0, 180)
+)
 
-make("TextLabel", {
-	Size = udim(1, -12, 1, 0),
-	Position = offset(12, 0),
+local welcome = make("Frame", {
+	Name = "WelcomePopup",
+	Size = offset(360, 180),
+	Position = udim(0.5, -180, 0.5, -90),
+	BackgroundColor3 = rgb(22, 22, 26),
+	BorderSizePixel = 0,
+	ZIndex = 100
+}, gui)
+
+local welcomeTitle = make("TextLabel", {
+	Size = udim(1, -30, 0, 28),
+	Position = offset(15, 18),
 	BackgroundTransparency = 1,
-	Text = "simple lil esp",
-	Font = cartoon,
+	Text = "hello hi this is made by",
+	TextColor3 = white,
+	Font = Enum.Font.Cartoon,
+	TextSize = 20,
+	TextXAlignment = Enum.TextXAlignment.Center,
+	ZIndex = 101
+}, welcome)
+
+local welcomeLink = make("TextLabel", {
+	Size = udim(1, -20, 0, 40),
+	Position = offset(10, 52),
+	BackgroundTransparency = 1,
+	Text = "https://scriptblox.com/u/indistiputed",
+	TextColor3 = white,
+	Font = Enum.Font.Cartoon,
+	TextSize = 15,
+	TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Center,
+	ZIndex = 101
+}, welcome)
+
+local okBtn = make("TextButton", {
+	Size = offset(100, 34),
+	Position = udim(0.5, -50, 1, -48),
+	BackgroundColor3 = rgb(35, 35, 40),
+	BorderSizePixel = 0,
+	Text = "OK",
+	TextColor3 = white,
+	Font = Enum.Font.Cartoon,
 	TextSize = 16,
-	TextColor3 = inkCol,
-	TextXAlignment = Enum.TextXAlignment.Left
-}, head)
+	AutoButtonColor = false,
+	ZIndex = 101
+}, welcome)
 
 local function circleBtn(txt, x, size)
 	local b = make("TextButton", {
@@ -338,17 +391,54 @@ local minimizeBtn, closeBtn =
 	circleBtn("-", -56, 16),
 	circleBtn("x", -28, 14)
 
---==================================================
--- COLOR PICKER
---==================================================
+make("TextLabel", {
+	Size = udim(1, -12, 1, 0),
+	Position = offset(12, 0),
+	BackgroundTransparency = 1,
+	Text = "simple lil esp",
+	Font = cartoon,
+	TextSize = 16,
+	TextColor3 = inkCol,
+	TextXAlignment = Enum.TextXAlignment.Left
+}, head)
+
+rowLabel(mainBody, "Player ESP", udim(0, 14, 0, 20))
+rowLabel(mainBody, "Team based", udim(0, 14, 0, 60))
+
+rowLabel(setBody, "Highlight", udim(0, 14, 0, 20))
+rowLabel(setBody, "Usernames", udim(0, 14, 0, 60))
+rowLabel(setBody, "Team name", udim(0, 14, 0, 100))
+rowLabel(setBody, "Box", udim(0, 14, 0, 140))
+rowLabel(setBody, "Tracers", udim(0, 14, 0, 180))
+
+corner(frame, 0, 10)
+stroke(frame, lineCol)
+corner(tabMain, 0, 8)
+corner(tabSet, 0, 8)
+corner(welcome, 0, 12)
+stroke(welcome, rgb(48, 48, 55), 1)
+corner(okBtn, 0, 8)
+
+skin(hlBtn, hlKnob, hlOn, true)
+skin(unBtn, unKnob, unOn, true)
+
+local ok = pcall(function()
+	local par = (gethui and gethui()) or game:GetService("CoreGui")
+
+	gui.Parent = par
+	tracerGui.Parent = par
+end)
+
+if not ok then
+	gui.Parent = LP:WaitForChild("PlayerGui")
+	tracerGui.Parent = LP:WaitForChild("PlayerGui")
+end
 
 local function makePicker(par, pos, startColor, onChange)
 	local api = {}
-
 	local h, s, v = startColor:ToHSV()
 	local color = startColor
-	local open = false
-	local queued = false
+	local open, queued = false, false
 
 	local swatch = make("TextButton", {
 		AnchorPoint = Vector2.new(0, 0.5),
@@ -438,28 +528,23 @@ local function makePicker(par, pos, startColor, onChange)
 		Text = "255, 0, 0"
 	}, pop)
 
-	local function makeKnob(par2, z, col)
-		local k = make("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			Size = offset(16, 16),
-			BackgroundColor3 = col,
-			BorderSizePixel = 0,
-			ZIndex = z
-		}, par2)
+	local svKnob, hueKnob =
+		makeKnob(svBox, 3, color),
+		makeKnob(hueSlider, 2, color)
 
-		corner(k, 1)
-		stroke(k, inkCol, 2.5)
+	local inputStroke = stroke(rgbInput, lineCol, 1.5)
 
-		return k
-	end
-
-	local svKnob = makeKnob(svBox, 3, color)
-	local hueKnob = makeKnob(hueSlider, 2, color)
-
-	local inputStroke = stroke(
-		rgbInput,
-		lineCol,
-		1.5
+	local spinTween = TS:Create(
+		popGrad,
+		TweenInfo.new(
+			2,
+			Enum.EasingStyle.Linear,
+			Enum.EasingDirection.In,
+			-1
+		),
+		{
+			Rotation = 360
+		}
 	)
 
 	make("UIGradient", {
@@ -535,17 +620,6 @@ local function makePicker(par, pos, startColor, onChange)
 		end)
 	end
 
-	local presetColors = {
-		rgb(255, 0, 0),
-		rgb(255, 140, 0),
-		rgb(255, 230, 0),
-		rgb(0, 255, 120),
-		rgb(0, 220, 255),
-		rgb(60, 100, 255),
-		rgb(149, 92, 215),
-		rgb(30, 30, 36)
-	}
-
 	for i, c in presetColors do
 		local chip = make("TextButton", {
 			Size = offset(16, 16),
@@ -565,7 +639,7 @@ local function makePicker(par, pos, startColor, onChange)
 		end)
 	end
 
-	local function updateSlider(i, name)
+	local function idk(i, name)
 		if name == "sv" then
 			s = math.clamp(
 				(i.Position.X - svBox.AbsolutePosition.X)
@@ -598,10 +672,10 @@ local function makePicker(par, pos, startColor, onChange)
 				return
 			end
 
-			updateSlider(i, name)
+			idk(i, name)
 
 			startDrag(i, function(m)
-				updateSlider(m, name)
+				idk(m, name)
 			end)
 		end)
 	end
@@ -635,10 +709,16 @@ local function makePicker(par, pos, startColor, onChange)
 		changed()
 	end)
 
-	local function setOpen(state)
+	local function WHAT(state)
 		open = state
 
 		if state then
+			for _, p in pickers do
+				if p ~= api then
+					p.close()
+				end
+			end
+
 			pop.Visible = true
 			popScale.Scale = 0.9
 			pop.Position = udim(0.5, 0, 1, -4)
@@ -661,18 +741,23 @@ local function makePicker(par, pos, startColor, onChange)
 			TS:Create(popBase, popTi, {
 				Transparency = 0
 			}):Play()
+
+			spinTween:Play()
 		else
 			pop.Visible = false
+			spinTween:Cancel()
 		end
 	end
 
 	swatch.Activated:Connect(function()
-		setOpen(not open)
+		WHAT(not open)
 	end)
 
 	api.close = function()
-		setOpen(false)
+		WHAT(false)
 	end
+
+	table.insert(pickers, api)
 
 	paint()
 
@@ -685,64 +770,52 @@ local mainPicker = makePicker(
 	espColor,
 	function(c)
 		espColor = c
+		woahj()
 	end
 )
 
---==================================================
--- PICKER MANAGEMENT
---==================================================
+local teamPicker = makePicker(
+	mainBody,
+	udim(0, 148, 0, 60),
+	teamColor,
+	function(c)
+		teamColor = c
+		woahj()
+	end
+)
 
-local function closePicker()
-	mainPicker.close()
+local function closePickers()
+	for _, p in pickers do
+		p.close()
+	end
 end
 
---==================================================
--- TAB SYSTEM
---==================================================
+woahj = function()
+	for player, d in espData do
+		local c = colorFor(player)
 
-local function paintTab(b, active)
-	TS:Create(b, fast, {
-		BackgroundColor3 = active
-			and accent
-			or rgb(238, 238, 243),
+		if d.tag then
+			d.tag.TextColor3 = c
+		end
 
-		TextColor3 = active
-			and white
-			or rgb(90, 90, 100)
-	}):Play()
+		if d.teamTag then
+			d.teamTag.TextColor3 = c
+		end
+
+		if d.boxStroke then
+			d.boxStroke.Color = c
+		end
+
+		if d.line then
+			d.line.BackgroundColor3 = c
+		end
+	end
 end
 
-local function showTab(name)
-	curTab = name
-
-	mainBody.Visible = name == "main"
-	setBody.Visible = name == "settings"
-
-	closePicker()
-
-	paintTab(tabMain, name == "main")
-	paintTab(tabSet, name == "settings")
-end
-
---==================================================
--- CHECK IF PLAYER IS PACT
---==================================================
-
-local function isPACT(player)
-	return player
-		and player.Team
-		and player.Team.Name == TARGET_TEAM
-end
-
---==================================================
--- VISIBILITY CHECK
---==================================================
-
+-- Checks whether there is a clear line of sight
+-- from the camera to the player.
 local function isPlayerVisible(player, d)
-	if not d
-		or not d.char
-		or not d.char.Parent
-	then
+	if not d or not d.char or not d.char.Parent then
 		return false
 	end
 
@@ -772,7 +845,6 @@ local function isPlayerVisible(player, d)
 	local params = RaycastParams.new()
 
 	params.FilterType = Enum.RaycastFilterType.Exclude
-
 	params.FilterDescendantsInstances = {
 		LP.Character
 	}
@@ -797,7 +869,11 @@ local function isPlayerVisible(player, d)
 end
 
 --==================================================
--- RED / GREEN HIGHLIGHT
+-- HIGHLIGHT VISIBILITY
+--
+-- PACT + visible = GREEN
+-- PACT + blocked = RED
+-- NON-PACT = NO HIGHLIGHT
 --==================================================
 
 local function updateHighlightVisibility()
@@ -807,8 +883,12 @@ local function updateHighlightVisibility()
 
 	for player, d in espData do
 
-		-- Remove highlight immediately if player is not PACT
-		if not isPACT(player) then
+		local isPACT =
+			player.Team
+			and player.Team.Name == TARGET_TEAM
+
+		-- Non-PACT players should never have a highlight
+		if not isPACT then
 
 			if d.hl then
 				d.hl:Destroy()
@@ -818,11 +898,11 @@ local function updateHighlightVisibility()
 			continue
 		end
 
-		-- Create highlight if PACT and missing
+		-- Make sure PACT players have a highlight
 		if not d.hl
 			and d.char
-			and d.char.Parent
-		then
+			and d.char.Parent then
+
 			d.hl = make("Highlight", {
 				Adornee = d.char,
 				FillColor = hiddenColor,
@@ -832,7 +912,6 @@ local function updateHighlightVisibility()
 			}, idkFolder)
 		end
 
-		-- Update PACT highlight color
 		if d.hl then
 			local visible = isPlayerVisible(player, d)
 
@@ -847,8 +926,51 @@ local function updateHighlightVisibility()
 	end
 end
 
+lpTeamConn = LP:GetPropertyChangedSignal("Team"):Connect(function()
+	woahj()
+end)
+
+local function paintTab(b, active)
+	TS:Create(b, fast, {
+		BackgroundColor3 = active and accent or rgb(238, 238, 243),
+		TextColor3 = active and white or rgb(90, 90, 100)
+	}):Play()
+end
+
+local function showTab(name)
+	curTab = name
+
+	mainBody.Visible = name == "main"
+	setBody.Visible = name == "settings"
+
+	closePickers()
+
+	paintTab(tabMain, name == "main")
+	paintTab(tabSet, name == "settings")
+
+	if isOpen then
+		TS:Create(frame, fast, {
+			Size = offset(190, sizes[name])
+		}):Play()
+	end
+end
+
+local function clearEsp(player)
+	local d = espData[player]
+
+	if d then
+		for _, k in pieceKeys do
+			if d[k] then
+				d[k]:Destroy()
+			end
+		end
+
+		espData[player] = nil
+	end
+end
+
 --==================================================
--- CREATE / REMOVE HIGHLIGHT
+-- CREATE / UPDATE ESP
 --==================================================
 
 local function sync(player)
@@ -858,24 +980,14 @@ local function sync(player)
 		return
 	end
 
-	--==================================================
-	-- ONLY PACT PLAYERS ARE HIGHLIGHTED
-	--==================================================
+	local c = colorFor(player)
 
-	if not isPACT(player) then
-		if d.hl then
-			d.hl:Destroy()
-			d.hl = nil
-		end
+	-- ONLY PACT GETS HIGHLIGHT
+	local isPACT =
+		player.Team
+		and player.Team.Name == TARGET_TEAM
 
-		return
-	end
-
-	--==================================================
-	-- CREATE PACT HIGHLIGHT
-	--==================================================
-
-	if isOn and hlOn then
+	if isOn and hlOn and isPACT then
 
 		if not d.hl then
 			d.hl = make("Highlight", {
@@ -893,28 +1005,116 @@ local function sync(player)
 		d.hl = nil
 
 	end
-end
 
---==================================================
--- CLEAR ESP
---==================================================
+	-- USERNAME / TEAM NAME
+	local key =
+		(isOn and unOn and 1 or 0)
+		+
+		(isOn and tnOn and 2 or 0)
 
-local function clearEsp(player)
-	local d = espData[player]
+	if key ~= d.key and (key == 0 or d.hd) then
 
-	if d then
-
-		if d.hl then
-			d.hl:Destroy()
+		if d.bb then
+			d.bb:Destroy()
+			d.bb, d.tag, d.teamTag = nil, nil, nil
 		end
 
-		espData[player] = nil
+		d.key = key
+
+		if key > 0 then
+
+			local both = key == 3
+
+			d.bb = make("BillboardGui", {
+				Adornee = d.hd,
+				Size = offset(120, both and 40 or 20),
+				StudsOffset = Vector3.new(
+					0,
+					both and 3 or 2.5,
+					0
+				),
+				AlwaysOnTop = true
+			}, idkFolder)
+
+			if key >= 2 then
+				d.teamTag = make("TextLabel", {
+					Size = udim(1, 0, 0, 20),
+					BackgroundTransparency = 1,
+					Text = teamText(player),
+					Font = cartoon,
+					TextSize = 13,
+					TextColor3 = c,
+					TextStrokeTransparency = 0.4
+				}, d.bb)
+			end
+
+			if key % 2 == 1 then
+				d.tag = make("TextLabel", {
+					Size = udim(1, 0, 0, 20),
+					Position = offset(
+						0,
+						both and 20 or 0
+					),
+					BackgroundTransparency = 1,
+					Text = player.DisplayName,
+					Font = cartoon,
+					TextSize = 14,
+					TextColor3 = c,
+					TextStrokeTransparency = 0.4
+				}, d.bb)
+			end
+		end
+	end
+
+	-- BOX
+	if isOn and boxOn then
+
+		if d.root and not d.boxGui then
+
+			d.boxGui = make("BillboardGui", {
+				Adornee = d.root,
+				Size = UDim2.new(4.5, 0, 6, 0),
+				AlwaysOnTop = true
+			}, idkFolder)
+
+			d.boxStroke = stroke(
+				make("Frame", {
+					Size = UDim2.fromScale(1, 1),
+					BackgroundTransparency = 1
+				}, d.boxGui),
+				c,
+				1.5
+			)
+		end
+
+	elseif d.boxGui then
+
+		d.boxGui:Destroy()
+		d.boxGui, d.boxStroke = nil, nil
+
+	end
+
+	-- TRACERS
+	if isOn and tracerOn then
+
+		if d.root and not d.line then
+
+			d.line = make("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Size = offset(2, 0),
+				BackgroundColor3 = c,
+				BorderSizePixel = 0,
+				Visible = false
+			}, tracerGui)
+		end
+
+	elseif d.line then
+
+		d.line:Destroy()
+		d.line, d.px, d.py = nil, nil, nil
+
 	end
 end
-
---==================================================
--- PLAYER SETUP
---==================================================
 
 local function setup(player, char)
 	clearEsp(player)
@@ -924,6 +1124,8 @@ local function setup(player, char)
 	}
 
 	espData[player] = d
+
+	sync(player)
 
 	d.root = char:WaitForChild(
 		"HumanoidRootPart",
@@ -940,46 +1142,42 @@ local function setup(player, char)
 	end
 end
 
---==================================================
--- DROP CONNECTIONS
---==================================================
-
 local function dropConns(player)
-	local connections = playerConns[player]
+	local t = woahjConns[player]
 
-	if connections then
-
-		for _, connection in connections do
-			connection:Disconnect()
+	if t then
+		for _, c in t do
+			c:Disconnect()
 		end
 
-		playerConns[player] = nil
+		woahjConns[player] = nil
 	end
 end
-
---==================================================
--- TRACK PLAYER
---==================================================
 
 local function trackPlayer(player)
 	if player == LP then
 		return
 	end
 
-	-- Remove old connections first
-	dropConns(player)
+	woahjConns[player] = {
 
-	playerConns[player] = {
 		player.CharacterAdded:Connect(function(char)
 			setup(player, char)
 		end),
 
-		-- IMPORTANT:
-		-- Update highlight when player changes team
 		player:GetPropertyChangedSignal("Team"):Connect(function()
-			if espData[player] then
-				sync(player)
+
+			local d = espData[player]
+
+			if d and d.teamTag then
+				d.teamTag.Text = teamText(player)
 			end
+
+			-- Immediately update PACT highlight
+			sync(player)
+
+			woahj()
+			updateHighlightVisibility()
 		end)
 	}
 
@@ -993,7 +1191,92 @@ local function trackPlayer(player)
 end
 
 --==================================================
--- ESP REFRESH
+-- TRACER UPDATE
+--==================================================
+
+local function updateLines()
+	local cam = workspace.CurrentCamera
+
+	if not cam then
+		return
+	end
+
+	local vs = cam.ViewportSize
+
+	local ax, ay =
+		vs.X / 2,
+		vs.Y
+
+	for _, d in espData do
+
+		local line = d.line
+
+		if line then
+
+			local rt = d.root
+			local show = false
+
+			if rt and rt.Parent then
+
+				local p =
+					cam:WorldToViewportPoint(
+						rt.Position
+					)
+
+				if p.Z > 0 then
+
+					show = true
+
+					if d.px ~= p.X
+						or d.py ~= p.Y then
+
+						d.px, d.py =
+							p.X,
+							p.Y
+
+						local dx =
+							p.X - ax
+
+						local dy =
+							p.Y - ay
+
+						line.Position = offset(
+							ax + dx / 2,
+							ay + dy / 2
+						)
+
+						line.Size = offset(
+							2,
+							math.sqrt(
+								dx * dx
+								+
+								dy * dy
+							)
+						)
+
+						line.Rotation =
+							math.deg(
+								math.atan2(
+									dy,
+									dx
+								)
+							) - 90
+					end
+
+				else
+					d.px = nil
+				end
+			end
+
+			if line.Visible ~= show then
+				line.Visible = show
+			end
+		end
+	end
+end
+
+--==================================================
+-- REFRESH
 --==================================================
 
 local function refresh()
@@ -1012,33 +1295,28 @@ local function refresh()
 				trackPlayer(player)
 			end
 
-			addConn = Players.PlayerAdded:Connect(
-				trackPlayer
-			)
+			addConn =
+				Players.PlayerAdded:Connect(
+					trackPlayer
+				)
 
-			remConn = Players.PlayerRemoving:Connect(
-				function(player)
-
-					dropConns(player)
-					clearEsp(player)
-
-				end
-			)
+			remConn =
+				Players.PlayerRemoving:Connect(
+					function(player)
+						dropConns(player)
+						clearEsp(player)
+					end
+				)
 		end
 
-	else
+	elseif addConn then
 
-		if addConn then
-			addConn:Disconnect()
-			addConn = nil
-		end
+		addConn:Disconnect()
+		remConn:Disconnect()
 
-		if remConn then
-			remConn:Disconnect()
-			remConn = nil
-		end
+		addConn, remConn = nil, nil
 
-		for player in playerConns do
+		for player in woahjConns do
 			dropConns(player)
 		end
 
@@ -1047,30 +1325,48 @@ local function refresh()
 		end
 	end
 
-	--==================================================
-	-- VISIBILITY UPDATER
-	--==================================================
+	-- TRACERS
+	if isOn
+		and tracerOn
+		and not lineConn then
 
-	if isOn and hlOn and not visibilityConn then
+		lineConn =
+			RS.RenderStepped:Connect(
+				updateLines
+			)
 
-		visibilityConn = RS.RenderStepped:Connect(
-			updateHighlightVisibility
-		)
+	elseif not (isOn and tracerOn)
+		and lineConn then
 
-	elseif not (isOn and hlOn) and visibilityConn then
+		lineConn:Disconnect()
+		lineConn = nil
+	end
+
+	-- HIGHLIGHT VISIBILITY
+	if isOn
+		and hlOn
+		and not visibilityConn then
+
+		visibilityConn =
+			RS.RenderStepped:Connect(
+				updateHighlightVisibility
+			)
+
+	elseif not (isOn and hlOn)
+		and visibilityConn then
 
 		visibilityConn:Disconnect()
 		visibilityConn = nil
-
 	end
 
+	-- Immediately update highlights
 	if isOn and hlOn then
 		updateHighlightVisibility()
 	end
 end
 
 --==================================================
--- ESP TOGGLE
+-- BUTTONS
 --==================================================
 
 toggleBtn.Activated:Connect(function()
@@ -1086,9 +1382,18 @@ toggleBtn.Activated:Connect(function()
 	refresh()
 end)
 
---==================================================
--- HIGHLIGHT TOGGLE
---==================================================
+teamBtn.Activated:Connect(function()
+
+	teamOn = not teamOn
+
+	skin(
+		teamBtn,
+		teamKnob,
+		teamOn
+	)
+
+	woahj()
+end)
 
 hlBtn.Activated:Connect(function()
 
@@ -1098,6 +1403,58 @@ hlBtn.Activated:Connect(function()
 		hlBtn,
 		hlKnob,
 		hlOn
+	)
+
+	refresh()
+end)
+
+unBtn.Activated:Connect(function()
+
+	unOn = not unOn
+
+	skin(
+		unBtn,
+		unKnob,
+		unOn
+	)
+
+	refresh()
+end)
+
+tnBtn.Activated:Connect(function()
+
+	tnOn = not tnOn
+
+	skin(
+		tnBtn,
+		tnKnob,
+		tnOn
+	)
+
+	refresh()
+end)
+
+boxBtn.Activated:Connect(function()
+
+	boxOn = not boxOn
+
+	skin(
+		boxBtn,
+		boxKnob,
+		boxOn
+	)
+
+	refresh()
+end)
+
+trBtn.Activated:Connect(function()
+
+	tracerOn = not tracerOn
+
+	skin(
+		trBtn,
+		trKnob,
+		tracerOn
 	)
 
 	refresh()
@@ -1116,7 +1473,7 @@ tabSet.Activated:Connect(function()
 end)
 
 --==================================================
--- MINIMIZE
+-- MINIMIZE / CLOSE
 --==================================================
 
 minimizeBtn.Activated:Connect(function()
@@ -1125,45 +1482,64 @@ minimizeBtn.Activated:Connect(function()
 
 	content.Visible = isOpen
 
-	closePicker()
+	closePickers()
 
 	TS:Create(frame, fast, {
-		Size = isOpen
-			and offset(190, 138)
+		Size =
+			isOpen
+			and offset(
+				190,
+				sizes[curTab]
+			)
 			or offset(190, 30)
 	}):Play()
-
 end)
-
---==================================================
--- CLOSE
---==================================================
 
 closeBtn.Activated:Connect(function()
 
 	isOn = false
 
 	refresh()
-	closePicker()
+
+	closePickers()
 
 	if visibilityConn then
 		visibilityConn:Disconnect()
 		visibilityConn = nil
 	end
 
-	if moveConn then
-		moveConn:Disconnect()
+	if lpTeamConn then
+		lpTeamConn:Disconnect()
 	end
 
-	if endConn then
-		endConn:Disconnect()
-	end
+	moveConn:Disconnect()
+	endConn:Disconnect()
 
 	gui:Destroy()
+	tracerGui:Destroy()
 end)
 
 --==================================================
--- DRAG UI
+-- WELCOME POPUP
+--==================================================
+
+okBtn.MouseEnter:Connect(function()
+	okBtn.BackgroundColor3 = rgb(48, 48, 54)
+end)
+
+okBtn.MouseLeave:Connect(function()
+	okBtn.BackgroundColor3 = rgb(35, 35, 40)
+end)
+
+okBtn.MouseButton1Click:Connect(function()
+
+	welcome:Destroy()
+
+	frame.Visible = true
+end)
+
+--==================================================
+-- DRAGGING
 --==================================================
 
 head.InputBegan:Connect(function(i)
@@ -1178,9 +1554,12 @@ head.InputBegan:Connect(function(i)
 
 	startDrag(i, function(m)
 
-		local d = m.Position - start
+		local d =
+			m.Position - start
 
-		if not dragged and d.Magnitude >= 8 then
+		if not dragged
+			and d.Magnitude >= 8 then
+
 			dragged = true
 		end
 
@@ -1192,45 +1571,6 @@ head.InputBegan:Connect(function(i)
 				sp.Y.Scale,
 				sp.Y.Offset + d.Y
 			)
-
 		end
 	end)
 end)
-
---==================================================
--- INITIAL STATE
---==================================================
-
-skin(
-	hlBtn,
-	hlKnob,
-	hlOn,
-	true
-)
-
-showTab("main")
-
---==================================================
--- PARENT GUI
---==================================================
-
-local ok = pcall(function()
-
-	local par = (gethui and gethui())
-		or game:GetService("CoreGui")
-
-	gui.Parent = par
-
-end)
-
-if not ok then
-
-	gui.Parent = LP:WaitForChild("PlayerGui")
-
-end
-
---==================================================
--- SHOW UI
---==================================================
-
-frame.Visible = true
