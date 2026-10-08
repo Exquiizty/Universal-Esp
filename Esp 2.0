@@ -43,10 +43,7 @@ local playerConns = {}
 
 local addConn
 local remConn
-local teamConn
 local visibilityConn
-local visibilityTimer = 0
-local VISIBILITY_INTERVAL = 0.12
 local moveConn
 local endConn
 
@@ -718,14 +715,7 @@ end
 -- ESP
 --==================================================
 
-local rayParams = RaycastParams.new()
-rayParams.FilterType = Enum.RaycastFilterType.Exclude
-rayParams.IgnoreWater = true
-
 local function isPlayerVisible(player, d)
-	if player == LP or player.Team == LP.Team then
-		return false
-	end
 	if not d
 		or not d.char
 		or not d.char.Parent
@@ -756,12 +746,20 @@ local function isPlayerVisible(player, d)
 		return true
 	end
 
-	rayParams.FilterDescendantsInstances = { LP.Character }
+	local params = RaycastParams.new()
+
+	params.FilterType = Enum.RaycastFilterType.Exclude
+
+	params.FilterDescendantsInstances = {
+		LP.Character
+	}
+
+	params.IgnoreWater = true
 
 	local result = workspace:Raycast(
 		origin,
 		direction,
-		rayParams
+		params
 	)
 
 	if not result then
@@ -786,17 +784,14 @@ local function updateHighlightVisibility()
 
 	for player, d in espData do
 		if d.hl then
-			if player.Team == LP.Team then
-				d.hl:Destroy()
-				d.hl = nil
-			else
-				local visible = isPlayerVisible(player, d)
-				local color = visible and visibleColor or hiddenColor
+			local visible = isPlayerVisible(player, d)
 
-				if d.hl.FillColor ~= color then
-					d.hl.FillColor = color
-					d.hl.OutlineColor = color
-				end
+			if visible then
+				d.hl.FillColor = visibleColor
+				d.hl.OutlineColor = visibleColor
+			else
+				d.hl.FillColor = hiddenColor
+				d.hl.OutlineColor = hiddenColor
 			end
 		end
 	end
@@ -810,14 +805,6 @@ local function sync(player)
 	local d = espData[player]
 
 	if not d then
-		return
-	end
-
-	if player == LP or player.Team == LP.Team then
-		if d.hl then
-			d.hl:Destroy()
-			d.hl = nil
-		end
 		return
 	end
 
@@ -897,9 +884,6 @@ local function trackPlayer(player)
 	playerConns[player] = {
 		player.CharacterAdded:Connect(function(char)
 			setup(player, char)
-		end),
-		player:GetPropertyChangedSignal("Team"):Connect(function()
-			sync(player)
 		end)
 	}
 
@@ -937,13 +921,6 @@ local function refresh()
 					clearEsp(player)
 				end
 			)
-
-			teamConn = LP:GetPropertyChangedSignal("Team"):Connect(function()
-				for player in espData do
-					sync(player)
-				end
-				visibilityTimer = 0
-			end)
 		end
 	else
 		if addConn then
@@ -954,11 +931,6 @@ local function refresh()
 		if remConn then
 			remConn:Disconnect()
 			remConn = nil
-		end
-
-		if teamConn then
-			teamConn:Disconnect()
-			teamConn = nil
 		end
 
 		for player in playerConns do
@@ -972,18 +944,12 @@ local function refresh()
 
 	-- Visibility updater
 	if isOn and hlOn and not visibilityConn then
-		visibilityTimer = 0
-		visibilityConn = RS.Heartbeat:Connect(function(dt)
-			visibilityTimer += dt
-			if visibilityTimer >= VISIBILITY_INTERVAL then
-				visibilityTimer = 0
-				updateHighlightVisibility()
-			end
-		end)
+		visibilityConn = RS.RenderStepped:Connect(
+			updateHighlightVisibility
+		)
 	elseif not (isOn and hlOn) and visibilityConn then
 		visibilityConn:Disconnect()
 		visibilityConn = nil
-		visibilityTimer = 0
 	end
 
 	if isOn and hlOn then
