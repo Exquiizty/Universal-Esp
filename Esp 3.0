@@ -1,0 +1,138 @@
+local function sync(player)
+	local d = espData[player]
+
+	if not d then
+		return
+	end
+
+	-- ONLY highlight players on the PACT team
+	if player.Team == nil or player.Team.Name ~= "PACT" then
+		if d.hl then
+			d.hl:Destroy()
+			d.hl = nil
+		end
+
+		-- Also remove other ESP elements for non-PACT players
+		if d.bb then
+			d.bb:Destroy()
+			d.bb, d.tag, d.teamTag = nil, nil, nil
+		end
+
+		if d.boxGui then
+			d.boxGui:Destroy()
+			d.boxGui, d.boxStroke = nil, nil
+		end
+
+		if d.line then
+			d.line:Destroy()
+			d.line, d.px, d.py = nil, nil, nil
+		end
+
+		return
+	end
+
+	local c = colorFor(player)
+
+	-- Highlight
+	if isOn and hlOn then
+		if not d.hl then
+			d.hl = make("Highlight", {
+				Adornee = d.char,
+				FillColor = hiddenColor,
+				OutlineColor = hiddenColor,
+				FillTransparency = 0.5,
+				DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+			}, idkFolder)
+		end
+	elseif d.hl then
+		d.hl:Destroy()
+		d.hl = nil
+	end
+
+	-- Usernames / team name
+	local key = (isOn and unOn and 1 or 0) + (isOn and tnOn and 2 or 0)
+
+	if key ~= d.key and (key == 0 or d.hd) then
+		if d.bb then
+			d.bb:Destroy()
+			d.bb, d.tag, d.teamTag = nil, nil, nil
+		end
+
+		d.key = key
+
+		if key > 0 then
+			local both = key == 3
+
+			d.bb = make("BillboardGui", {
+				Adornee = d.hd,
+				Size = offset(120, both and 40 or 20),
+				StudsOffset = Vector3.new(0, both and 3 or 2.5, 0),
+				AlwaysOnTop = true
+			}, idkFolder)
+
+			if key >= 2 then
+				d.teamTag = make("TextLabel", {
+					Size = udim(1, 0, 0, 20),
+					BackgroundTransparency = 1,
+					Text = teamText(player),
+					Font = cartoon,
+					TextSize = 13,
+					TextColor3 = c,
+					TextStrokeTransparency = 0.4
+				}, d.bb)
+			end
+
+			if key % 2 == 1 then
+				d.tag = make("TextLabel", {
+					Size = udim(1, 0, 0, 20),
+					Position = offset(0, both and 20 or 0),
+					BackgroundTransparency = 1,
+					Text = player.DisplayName,
+					Font = cartoon,
+					TextSize = 14,
+					TextColor3 = c,
+					TextStrokeTransparency = 0.4
+				}, d.bb)
+			end
+		end
+	end
+
+	-- Box
+	if isOn and boxOn then
+		if d.root and not d.boxGui then
+			d.boxGui = make("BillboardGui", {
+				Adornee = d.root,
+				Size = UDim2.new(4.5, 0, 6, 0),
+				AlwaysOnTop = true
+			}, idkFolder)
+
+			d.boxStroke = stroke(
+				make("Frame", {
+					Size = UDim2.fromScale(1, 1),
+					BackgroundTransparency = 1
+				}, d.boxGui),
+				c,
+				1.5
+			)
+		end
+	elseif d.boxGui then
+		d.boxGui:Destroy()
+		d.boxGui, d.boxStroke = nil, nil
+	end
+
+	-- Tracers
+	if isOn and tracerOn then
+		if d.root and not d.line then
+			d.line = make("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Size = offset(2, 0),
+				BackgroundColor3 = c,
+				BorderSizePixel = 0,
+				Visible = false
+			}, tracerGui)
+		end
+	elseif d.line then
+		d.line:Destroy()
+		d.line, d.px, d.py = nil, nil, nil
+	end
+end
