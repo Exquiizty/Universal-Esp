@@ -1,0 +1,1258 @@
+```lua
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local TS = game:GetService("TweenService")
+local RS = game:GetService("RunService")
+local LP = Players.LocalPlayer
+
+local rgb, udim, offset = Color3.fromRGB, UDim2.new, UDim2.fromOffset
+local white = Color3.new(1, 1, 1)
+local inkCol = rgb(30, 30, 36)
+local bgCol, lineCol, accent, offCol = rgb(255, 255, 255), rgb(210, 210, 218), rgb(149, 92, 215), rgb(205, 205, 212)
+local cartoon = Enum.Font.FredokaOne
+local fast = TweenInfo.new(0.15)
+local popTi = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+
+local sizes = {
+    main = 138,
+    settings = 178
+}
+
+local pieceKeys = {
+    "hl",
+    "bb",
+    "boxGui",
+    "line"
+}
+
+local espColor = rgb(255, 0, 0)
+local teamColor = rgb(60, 100, 255)
+
+-- Fixed red highlight color
+local hiddenColor = rgb(255, 0, 0)
+
+-- ONLY THIS TEAM GETS HIGHLIGHTED
+local TARGET_TEAM = "PACT"
+
+local isOn, hlOn, unOn, tnOn, boxOn, tracerOn, teamOn =
+    false, true, true, false, false, false, false
+
+local isOpen, curTab = true, "main"
+
+local espData, woahjConns, pickers = {}, {}, {}
+
+local addConn, remConn, lineConn, lpTeamConn
+local visibilityConn
+local onMove, held
+local woahj
+
+local presetColors = {
+    rgb(255, 0, 0),
+    rgb(255, 140, 0),
+    rgb(255, 230, 0),
+    rgb(0, 255, 120),
+    rgb(0, 220, 255),
+    rgb(60, 100, 255),
+    rgb(149, 92, 215),
+    rgb(30, 30, 36)
+}
+
+local moveConn = UIS.InputChanged:Connect(function(m)
+    if onMove and (
+        m.UserInputType == Enum.UserInputType.MouseMovement
+        or m.UserInputType == Enum.UserInputType.Touch
+    ) then
+        onMove(m)
+    end
+end)
+
+local endConn = UIS.InputEnded:Connect(function(i)
+    if held and (
+        i == held
+        or (
+            i.UserInputType == Enum.UserInputType.MouseButton1
+            and held.UserInputType == Enum.UserInputType.MouseButton1
+        )
+    ) then
+        onMove, held = nil, nil
+    end
+end)
+
+local function isPress(i)
+    return i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch
+end
+
+local function startDrag(i, fn)
+    held = i
+
+    onMove = function(m)
+        if m == i or m.UserInputType == Enum.UserInputType.MouseMovement then
+            fn(m)
+        end
+    end
+end
+
+local function make(class, props, par)
+    local o = Instance.new(class)
+
+    for k, val in props do
+        o[k] = val
+    end
+
+    o.Parent = par
+    return o
+end
+
+local function corner(o, a, b)
+    make("UICorner", {
+        CornerRadius = UDim.new(a, b or 0)
+    }, o)
+end
+
+local function stroke(o, c, t, tr)
+    return make("UIStroke", {
+        Color = c,
+        Thickness = t or 1,
+        Transparency = tr or 0
+    }, o)
+end
+
+local function makeToggle(par, pos)
+    local b = make("TextButton", {
+        AnchorPoint = Vector2.new(0, 0.5),
+        Size = offset(44, 22),
+        Position = pos,
+        BackgroundColor3 = offCol,
+        Text = "",
+        AutoButtonColor = false,
+        BorderSizePixel = 0
+    }, par)
+
+    local k = make("Frame", {
+        Size = offset(16, 16),
+        Position = udim(0, 3, 0.5, -8),
+        BackgroundColor3 = white,
+        BorderSizePixel = 0
+    }, b)
+
+    corner(b, 1)
+    corner(k, 1)
+
+    return b, k
+end
+
+local function skin(b, k, state, instant)
+    local col = state and accent or offCol
+    local pos = state
+        and udim(1, -19, 0.5, -8)
+        or udim(0, 3, 0.5, -8)
+
+    if instant then
+        b.BackgroundColor3 = col
+        k.Position = pos
+    else
+        TS:Create(b, fast, {
+            BackgroundColor3 = col
+        }):Play()
+
+        TS:Create(k, fast, {
+            Position = pos
+        }):Play()
+    end
+end
+
+local function rowLabel(par, txt, pos)
+    return make("TextLabel", {
+        AnchorPoint = Vector2.new(0, 0.5),
+        Size = offset(80, 22),
+        Position = pos,
+        BackgroundTransparency = 1,
+        Text = txt,
+        Font = cartoon,
+        TextSize = 14,
+        TextColor3 = rgb(50, 50, 58),
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, par)
+end
+
+local function makeKnob(par, z, col)
+    local k = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Size = offset(16, 16),
+        BackgroundColor3 = col,
+        BorderSizePixel = 0,
+        ZIndex = z
+    }, par)
+
+    corner(k, 1)
+    stroke(k, inkCol, 2.5)
+
+    return k
+end
+
+local function colorFor(player)
+    if teamOn and player.Team ~= LP.Team then
+        return teamColor
+    end
+
+    return espColor
+end
+
+local function teamText(player)
+    return player.Team and player.Team.Name or "No team"
+end
+
+local gui = make("ScreenGui", {
+    Name = "ESPUI",
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    DisplayOrder = 999,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+})
+
+local tracerGui = make("ScreenGui", {
+    Name = "ESPLines",
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    DisplayOrder = 998,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+})
+
+local idkFolder = make("Folder", {}, gui)
+
+local frame = make("Frame", {
+    Size = offset(190, sizes.main),
+    Position = udim(0.5, -95, 0.35, 0),
+    BackgroundColor3 = bgCol,
+    BorderSizePixel = 0,
+    Visible = false
+}, gui)
+
+local head = make("Frame", {
+    Size = udim(1, -64, 0, 30),
+    BackgroundTransparency = 1
+}, frame)
+
+local content = make("Frame", {
+    Size = udim(1, 0, 1, -30),
+    Position = offset(0, 30),
+    BackgroundTransparency = 1
+}, frame)
+
+local tabRow = make("Frame", {
+    Size = udim(1, 0, 0, 26),
+    BackgroundTransparency = 1
+}, content)
+
+local tabMain = make("TextButton", {
+    Size = offset(84, 22),
+    Position = offset(10, 2),
+    BackgroundColor3 = accent,
+    Text = "main",
+    Font = cartoon,
+    TextSize = 13,
+    TextColor3 = white,
+    AutoButtonColor = false,
+    BorderSizePixel = 0
+}, tabRow)
+
+local tabSet = make("TextButton", {
+    Size = offset(84, 22),
+    Position = offset(96, 2),
+    BackgroundColor3 = rgb(238, 238, 243),
+    Text = "settings",
+    Font = cartoon,
+    TextSize = 13,
+    TextColor3 = rgb(90, 90, 100),
+    AutoButtonColor = false,
+    BorderSizePixel = 0
+}, tabRow)
+
+local mainBody = make("Frame", {
+    Size = udim(1, 0, 0, 80),
+    Position = offset(0, 28),
+    BackgroundTransparency = 1
+}, content)
+
+local setBody = make("ScrollingFrame", {
+    Size = udim(1, 0, 0, 120),
+    Position = offset(0, 28),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    CanvasSize = offset(0, 200),
+    ScrollBarThickness = 3,
+    ScrollBarImageColor3 = rgb(190, 190, 200),
+    ScrollingDirection = Enum.ScrollingDirection.Y,
+    Active = true,
+    Visible = false
+}, content)
+
+local toggleBtn, knob = makeToggle(mainBody, udim(0, 96, 0, 20))
+local teamBtn, teamKnob = makeToggle(mainBody, udim(0, 96, 0, 60))
+
+local hlBtn, hlKnob = makeToggle(setBody, udim(1, -58, 0, 20))
+local unBtn, unKnob = makeToggle(setBody, udim(1, -58, 0, 60))
+local tnBtn, tnKnob = makeToggle(setBody, udim(1, -58, 0, 100))
+local boxBtn, boxKnob = makeToggle(setBody, udim(1, -58, 0, 140))
+local trBtn, trKnob = makeToggle(setBody, udim(1, -58, 0, 180))
+
+local welcome = make("Frame", {
+    Name = "WelcomePopup",
+    Size = offset(360, 180),
+    Position = udim(0.5, -180, 0.5, -90),
+    BackgroundColor3 = rgb(22, 22, 26),
+    BorderSizePixel = 0,
+    ZIndex = 100
+}, gui)
+
+make("TextLabel", {
+    Size = udim(1, -30, 0, 28),
+    Position = offset(15, 18),
+    BackgroundTransparency = 1,
+    Text = "hello hi this is made by",
+    TextColor3 = white,
+    Font = Enum.Font.Cartoon,
+    TextSize = 20,
+    TextXAlignment = Enum.TextXAlignment.Center,
+    ZIndex = 101
+}, welcome)
+
+make("TextLabel", {
+    Size = udim(1, -20, 0, 40),
+    Position = offset(10, 52),
+    BackgroundTransparency = 1,
+    Text = "https://scriptblox.com/u/indistiputed",
+    TextColor3 = white,
+    Font = Enum.Font.Cartoon,
+    TextSize = 15,
+    TextWrapped = true,
+    TextXAlignment = Enum.TextXAlignment.Center,
+    ZIndex = 101
+}, welcome)
+
+local okBtn = make("TextButton", {
+    Size = offset(100, 34),
+    Position = udim(0.5, -50, 1, -48),
+    BackgroundColor3 = rgb(35, 35, 40),
+    BorderSizePixel = 0,
+    Text = "OK",
+    TextColor3 = white,
+    Font = Enum.Font.Cartoon,
+    TextSize = 16,
+    AutoButtonColor = false,
+    ZIndex = 101
+}, welcome)
+
+local function circleBtn(txt, x, size)
+    local b = make("TextButton", {
+        Size = offset(24, 24),
+        Position = udim(1, x, 0, 3),
+        BackgroundColor3 = rgb(238, 238, 243),
+        Text = txt,
+        Font = cartoon,
+        TextSize = size,
+        TextColor3 = rgb(60, 60, 70),
+        BorderSizePixel = 0
+    }, frame)
+
+    corner(b, 1)
+    return b
+end
+
+local minimizeBtn, closeBtn =
+    circleBtn("-", -56, 16),
+    circleBtn("x", -28, 14)
+
+make("TextLabel", {
+    Size = udim(1, -12, 1, 0),
+    Position = offset(12, 0),
+    BackgroundTransparency = 1,
+    Text = "simple lil esp",
+    Font = cartoon,
+    TextSize = 16,
+    TextColor3 = inkCol,
+    TextXAlignment = Enum.TextXAlignment.Left
+}, head)
+
+rowLabel(mainBody, "Player ESP", udim(0, 14, 0, 20))
+rowLabel(mainBody, "Team based", udim(0, 14, 0, 60))
+
+rowLabel(setBody, "Highlight", udim(0, 14, 0, 20))
+rowLabel(setBody, "Usernames", udim(0, 14, 0, 60))
+rowLabel(setBody, "Team name", udim(0, 14, 0, 100))
+rowLabel(setBody, "Box", udim(0, 14, 0, 140))
+rowLabel(setBody, "Tracers", udim(0, 14, 0, 180))
+
+corner(frame, 0, 10)
+stroke(frame, lineCol)
+corner(tabMain, 0, 8)
+corner(tabSet, 0, 8)
+corner(welcome, 0, 12)
+stroke(welcome, rgb(48, 48, 55), 1)
+corner(okBtn, 0, 8)
+
+skin(hlBtn, hlKnob, hlOn, true)
+skin(unBtn, unKnob, unOn, true)
+
+local ok = pcall(function()
+    local par = (gethui and gethui()) or game:GetService("CoreGui")
+    gui.Parent = par
+    tracerGui.Parent = par
+end)
+
+if not ok then
+    gui.Parent = LP:WaitForChild("PlayerGui")
+    tracerGui.Parent = LP:WaitForChild("PlayerGui")
+end
+
+local function makePicker(par, pos, startColor, onChange)
+    local api = {}
+    local h, s, v = startColor:ToHSV()
+    local color = startColor
+    local open, queued = false, false
+
+    local swatch = make("TextButton", {
+        AnchorPoint = Vector2.new(0, 0.5),
+        Size = offset(26, 26),
+        Position = pos,
+        BackgroundColor3 = color,
+        Text = "",
+        AutoButtonColor = false,
+        BorderSizePixel = 0
+    }, par)
+
+    local pop = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0),
+        Size = offset(190, 196),
+        Position = udim(0.5, 0, 1, 6),
+        BackgroundColor3 = bgCol,
+        BorderSizePixel = 0,
+        Visible = false
+    }, frame)
+
+    local popBase = stroke(pop, rgb(225, 225, 232), 2)
+    local popStroke = stroke(pop, white, 2)
+
+    local popGrad = make("UIGradient", {
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 1),
+            NumberSequenceKeypoint.new(0.25, 0.5),
+            NumberSequenceKeypoint.new(0.48, 0),
+            NumberSequenceKeypoint.new(0.5, 1),
+            NumberSequenceKeypoint.new(0.75, 0.5),
+            NumberSequenceKeypoint.new(0.98, 0),
+            NumberSequenceKeypoint.new(1, 1)
+        })
+    }, popStroke)
+
+    local popScale = make("UIScale", {}, pop)
+
+    local svBox = make("Frame", {
+        Size = offset(170, 96),
+        Position = offset(10, 10),
+        BackgroundColor3 = white,
+        BorderSizePixel = 0,
+        Active = true
+    }, pop)
+
+    local svGrad = make("UIGradient", {}, svBox)
+
+    local darkOverlay = make("Frame", {
+        Size = UDim2.fromScale(1, 1),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BorderSizePixel = 0,
+        ZIndex = 2
+    }, svBox)
+
+    local hueSlider = make("Frame", {
+        Size = offset(170, 20),
+        Position = offset(10, 112),
+        BackgroundTransparency = 1,
+        Active = true
+    }, pop)
+
+    local hueBar = make("Frame", {
+        Size = udim(1, 0, 0, 10),
+        Position = udim(0, 0, 0.5, -5),
+        BackgroundColor3 = white,
+        BorderSizePixel = 0
+    }, hueSlider)
+
+    local previewDot = make("Frame", {
+        Size = offset(24, 24),
+        Position = offset(10, 162),
+        BackgroundColor3 = color,
+        BorderSizePixel = 0
+    }, pop)
+
+    local rgbInput = make("TextBox", {
+        Size = offset(130, 24),
+        Position = offset(50, 162),
+        BackgroundColor3 = rgb(238, 238, 243),
+        BorderSizePixel = 0,
+        Font = cartoon,
+        TextSize = 13,
+        TextColor3 = inkCol,
+        PlaceholderText = "255, 0, 0",
+        PlaceholderColor3 = rgb(150, 150, 160),
+        ClearTextOnFocus = false,
+        Text = "255, 0, 0"
+    }, pop)
+
+    local svKnob, hueKnob =
+        makeKnob(svBox, 3, color),
+        makeKnob(hueSlider, 2, color)
+
+    local inputStroke = stroke(rgbInput, lineCol, 1.5)
+
+    local spinTween = TS:Create(
+        popGrad,
+        TweenInfo.new(2, Enum.EasingStyle.Linear, Enum.EasingDirection.In, -1),
+        {Rotation = 360}
+    )
+
+    make("UIGradient", {
+        Transparency = NumberSequence.new(1, 0),
+        Rotation = 90
+    }, darkOverlay)
+
+    make("UIGradient", {
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, rgb(255, 0, 0)),
+            ColorSequenceKeypoint.new(1 / 6, rgb(255, 255, 0)),
+            ColorSequenceKeypoint.new(2 / 6, rgb(0, 255, 0)),
+            ColorSequenceKeypoint.new(3 / 6, rgb(0, 255, 255)),
+            ColorSequenceKeypoint.new(4 / 6, rgb(0, 0, 255)),
+            ColorSequenceKeypoint.new(5 / 6, rgb(255, 0, 255)),
+            ColorSequenceKeypoint.new(1, rgb(255, 0, 0))
+        })
+    }, hueBar)
+
+    corner(swatch, 0, 8)
+    stroke(swatch, inkCol, 1.5, 0.6)
+    corner(pop, 0, 12)
+    corner(svBox, 0, 8)
+    corner(darkOverlay, 0, 8)
+    corner(hueBar, 1)
+    corner(previewDot, 1)
+    stroke(previewDot, inkCol, 1, 0.6)
+    corner(rgbInput, 0, 8)
+
+    local function paint()
+        color = Color3.fromHSV(h, s, v)
+
+        swatch.BackgroundColor3 = color
+        previewDot.BackgroundColor3 = color
+        svKnob.BackgroundColor3 = color
+        hueKnob.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+
+        svGrad.Color = ColorSequence.new(white, Color3.fromHSV(h, 1, 1))
+
+        popGrad.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, accent),
+            ColorSequenceKeypoint.new(0.48, color),
+            ColorSequenceKeypoint.new(0.5, accent),
+            ColorSequenceKeypoint.new(0.98, color),
+            ColorSequenceKeypoint.new(1, accent)
+        })
+
+        svKnob.Position = UDim2.fromScale(s, 1 - v)
+        hueKnob.Position = UDim2.fromScale(h, 0.5)
+
+        rgbInput.Text = string.format(
+            "%d, %d, %d",
+            math.round(color.R * 255),
+            math.round(color.G * 255),
+            math.round(color.B * 255)
+        )
+    end
+
+    local function changed()
+        if queued then
+            return
+        end
+
+        queued = true
+
+        task.defer(function()
+            queued = false
+            paint()
+            onChange(color)
+        end)
+    end
+
+    for i, c in presetColors do
+        local chip = make("TextButton", {
+            Size = offset(16, 16),
+            Position = offset(10 + (i - 1) * 22, 138),
+            BackgroundColor3 = c,
+            Text = "",
+            AutoButtonColor = false,
+            BorderSizePixel = 0
+        }, pop)
+
+        corner(chip, 1)
+        stroke(chip, inkCol, 1, 0.6)
+
+        chip.Activated:Connect(function()
+            h, s, v = c:ToHSV()
+            changed()
+        end)
+    end
+
+    local function idk(i, name)
+        if name == "sv" then
+            s = math.clamp(
+                (i.Position.X - svBox.AbsolutePosition.X) / svBox.AbsoluteSize.X,
+                0, 1
+            )
+
+            v = 1 - math.clamp(
+                (i.Position.Y - svBox.AbsolutePosition.Y) / svBox.AbsoluteSize.Y,
+                0, 1
+            )
+        else
+            h = math.clamp(
+                (i.Position.X - hueSlider.AbsolutePosition.X) / hueSlider.AbsoluteSize.X,
+                0, 0.999
+            )
+        end
+
+        changed()
+    end
+
+    local function bindSlider(fr, name)
+        fr.InputBegan:Connect(function(i)
+            if not isPress(i) then
+                return
+            end
+
+            idk(i, name)
+
+            startDrag(i, function(m)
+                idk(m, name)
+            end)
+        end)
+    end
+
+    bindSlider(svBox, "sv")
+    bindSlider(hueSlider, "hue")
+
+    rgbInput.Focused:Connect(function()
+        TS:Create(inputStroke, fast, {Color = accent}):Play()
+    end)
+
+    rgbInput.FocusLost:Connect(function()
+        TS:Create(inputStroke, fast, {Color = lineCol}):Play()
+
+        local r, g, b = rgbInput.Text:match("(%d+)%D+(%d+)%D+(%d+)")
+
+        if r then
+            h, s, v = rgb(
+                math.clamp(tonumber(r), 0, 255),
+                math.clamp(tonumber(g), 0, 255),
+                math.clamp(tonumber(b), 0, 255)
+            ):ToHSV()
+        end
+
+        changed()
+    end)
+
+    local function WHAT(state)
+        open = state
+
+        if state then
+            for _, p in pickers do
+                if p ~= api then
+                    p.close()
+                end
+            end
+
+            pop.Visible = true
+            popScale.Scale = 0.9
+            pop.Position = udim(0.5, 0, 1, -4)
+            popStroke.Transparency = 1
+            popBase.Transparency = 1
+            popGrad.Rotation = 0
+
+            TS:Create(popScale, popTi, {Scale = 1}):Play()
+            TS:Create(pop, popTi, {Position = udim(0.5, 0, 1, 6)}):Play()
+            TS:Create(popStroke, popTi, {Transparency = 0}):Play()
+            TS:Create(popBase, popTi, {Transparency = 0}):Play()
+
+            spinTween:Play()
+        else
+            pop.Visible = false
+            spinTween:Cancel()
+        end
+    end
+
+    swatch.Activated:Connect(function()
+        WHAT(not open)
+    end)
+
+    api.close = function()
+        WHAT(false)
+    end
+
+    table.insert(pickers, api)
+
+    paint()
+    return api
+end
+
+local mainPicker = makePicker(
+    mainBody,
+    udim(0, 148, 0, 20),
+    espColor,
+    function(c)
+        espColor = c
+        woahj()
+    end
+)
+
+local teamPicker = makePicker(
+    mainBody,
+    udim(0, 148, 0, 60),
+    teamColor,
+    function(c)
+        teamColor = c
+        woahj()
+    end
+)
+
+local function closePickers()
+    for _, p in pickers do
+        p.close()
+    end
+end
+
+woahj = function()
+    for player, d in espData do
+        local c = colorFor(player)
+
+        if d.tag then
+            d.tag.TextColor3 = c
+        end
+
+        if d.teamTag then
+            d.teamTag.TextColor3 = c
+        end
+
+        if d.boxStroke then
+            d.boxStroke.Color = c
+        end
+
+        if d.line then
+            d.line.BackgroundColor3 = c
+        end
+    end
+end
+
+--==================================================
+-- HIGHLIGHT COLOR
+-- PACT = ALWAYS RED
+-- NON-PACT = NO HIGHLIGHT
+--==================================================
+
+local function updateHighlightVisibility()
+    if not isOn or not hlOn then
+        return
+    end
+
+    for player, d in espData do
+        local isPACT = player.Team and player.Team.Name == TARGET_TEAM
+
+        if not isPACT then
+            if d.hl then
+                d.hl:Destroy()
+                d.hl = nil
+            end
+
+            continue
+        end
+
+        if not d.hl and d.char and d.char.Parent then
+            d.hl = make("Highlight", {
+                Adornee = d.char,
+                FillColor = hiddenColor,
+                OutlineColor = hiddenColor,
+                FillTransparency = 0.5,
+                DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            }, idkFolder)
+        end
+
+        if d.hl then
+            d.hl.FillColor = hiddenColor
+            d.hl.OutlineColor = hiddenColor
+        end
+    end
+end
+
+lpTeamConn = LP:GetPropertyChangedSignal("Team"):Connect(function()
+    woahj()
+end)
+
+local function paintTab(b, active)
+    TS:Create(b, fast, {
+        BackgroundColor3 = active and accent or rgb(238, 238, 243),
+        TextColor3 = active and white or rgb(90, 90, 100)
+    }):Play()
+end
+
+local function showTab(name)
+    curTab = name
+
+    mainBody.Visible = name == "main"
+    setBody.Visible = name == "settings"
+
+    closePickers()
+
+    paintTab(tabMain, name == "main")
+    paintTab(tabSet, name == "settings")
+
+    if isOpen then
+        TS:Create(frame, fast, {Size = offset(190, sizes[name])}):Play()
+    end
+end
+
+local function clearEsp(player)
+    local d = espData[player]
+
+    if d then
+        for _, k in pieceKeys do
+            if d[k] then
+                d[k]:Destroy()
+            end
+        end
+
+        espData[player] = nil
+    end
+end
+
+--==================================================
+-- CREATE / UPDATE ESP
+--==================================================
+
+local function sync(player)
+    local d = espData[player]
+
+    if not d then
+        return
+    end
+
+    local c = colorFor(player)
+    local isPACT = player.Team and player.Team.Name == TARGET_TEAM
+
+    if isOn and hlOn and isPACT then
+        if not d.hl and d.char and d.char.Parent then
+            d.hl = make("Highlight", {
+                Adornee = d.char,
+                FillColor = hiddenColor,
+                OutlineColor = hiddenColor,
+                FillTransparency = 0.5,
+                DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            }, idkFolder)
+        end
+    elseif d.hl then
+        d.hl:Destroy()
+        d.hl = nil
+    end
+
+    -- USERNAME / TEAM NAME
+    local key =
+        (isOn and unOn and 1 or 0)
+        +
+        (isOn and tnOn and 2 or 0)
+
+    if key ~= d.key and (key == 0 or d.hd) then
+        if d.bb then
+            d.bb:Destroy()
+            d.bb, d.tag, d.teamTag = nil, nil, nil
+        end
+
+        d.key = key
+
+        if key > 0 then
+            local both = key == 3
+
+            d.bb = make("BillboardGui", {
+                Adornee = d.hd,
+                Size = offset(120, both and 40 or 20),
+                StudsOffset = Vector3.new(0, both and 3 or 2.5, 0),
+                AlwaysOnTop = true
+            }, idkFolder)
+
+            if key >= 2 then
+                d.teamTag = make("TextLabel", {
+                    Size = udim(1, 0, 0, 20),
+                    BackgroundTransparency = 1,
+                    Text = teamText(player),
+                    Font = cartoon,
+                    TextSize = 13,
+                    TextColor3 = c,
+                    TextStrokeTransparency = 0.4
+                }, d.bb)
+            end
+
+            if key % 2 == 1 then
+                d.tag = make("TextLabel", {
+                    Size = udim(1, 0, 0, 20),
+                    Position = offset(0, both and 20 or 0),
+                    BackgroundTransparency = 1,
+                    Text = player.DisplayName,
+                    Font = cartoon,
+                    TextSize = 14,
+                    TextColor3 = c,
+                    TextStrokeTransparency = 0.4
+                }, d.bb)
+            end
+        end
+    end
+
+    -- BOX
+    if isOn and boxOn then
+        if d.root and not d.boxGui then
+            d.boxGui = make("BillboardGui", {
+                Adornee = d.root,
+                Size = UDim2.new(4.5, 0, 6, 0),
+                AlwaysOnTop = true
+            }, idkFolder)
+
+            d.boxStroke = stroke(
+                make("Frame", {
+                    Size = UDim2.fromScale(1, 1),
+                    BackgroundTransparency = 1
+                }, d.boxGui),
+                c,
+                1.5
+            )
+        end
+    elseif d.boxGui then
+        d.boxGui:Destroy()
+        d.boxGui, d.boxStroke = nil, nil
+    end
+
+    -- TRACERS
+    if isOn and tracerOn then
+        if d.root and not d.line then
+            d.line = make("Frame", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Size = offset(2, 0),
+                BackgroundColor3 = c,
+                BorderSizePixel = 0,
+                Visible = false
+            }, tracerGui)
+        end
+    elseif d.line then
+        d.line:Destroy()
+        d.line, d.px, d.py = nil, nil, nil
+    end
+end
+
+local function setup(player, char)
+    clearEsp(player)
+
+    local d = {char = char}
+    espData[player] = d
+
+    sync(player)
+
+    d.root = char:WaitForChild("HumanoidRootPart", 5)
+    d.hd = char:WaitForChild("Head", 5)
+
+    if espData[player] == d then
+        sync(player)
+    end
+end
+
+local function dropConns(player)
+    local t = woahjConns[player]
+
+    if t then
+        for _, c in t do
+            c:Disconnect()
+        end
+
+        woahjConns[player] = nil
+    end
+end
+
+local function trackPlayer(player)
+    if player == LP then
+        return
+    end
+
+    woahjConns[player] = {
+        player.CharacterAdded:Connect(function(char)
+            setup(player, char)
+        end),
+
+        player:GetPropertyChangedSignal("Team"):Connect(function()
+            local d = espData[player]
+
+            if d and d.teamTag then
+                d.teamTag.Text = teamText(player)
+            end
+
+            sync(player)
+            woahj()
+            updateHighlightVisibility()
+        end)
+    }
+
+    if player.Character then
+        task.spawn(setup, player, player.Character)
+    end
+end
+
+--==================================================
+-- TRACER UPDATE
+--==================================================
+
+local function updateLines()
+    local cam = workspace.CurrentCamera
+
+    if not cam then
+        return
+    end
+
+    local vs = cam.ViewportSize
+    local ax, ay = vs.X / 2, vs.Y
+
+    for _, d in espData do
+        local line = d.line
+
+        if line then
+            local rt = d.root
+            local show = false
+
+            if rt and rt.Parent then
+                local p = cam:WorldToViewportPoint(rt.Position)
+
+                if p.Z > 0 then
+                    show = true
+
+                    if d.px ~= p.X or d.py ~= p.Y then
+                        d.px, d.py = p.X, p.Y
+
+                        local dx = p.X - ax
+                        local dy = p.Y - ay
+
+                        line.Position = offset(ax + dx / 2, ay + dy / 2)
+                        line.Size = offset(2, math.sqrt(dx * dx + dy * dy))
+                        line.Rotation = math.deg(math.atan2(dy, dx)) - 90
+                    end
+                else
+                    d.px = nil
+                end
+            end
+
+            if line.Visible ~= show then
+                line.Visible = show
+            end
+        end
+    end
+end
+
+--==================================================
+-- REFRESH
+--==================================================
+
+local function refresh()
+    if isOn then
+        if addConn then
+            for player in espData do
+                sync(player)
+            end
+        else
+            for _, player in Players:GetPlayers() do
+                trackPlayer(player)
+            end
+
+            addConn = Players.PlayerAdded:Connect(trackPlayer)
+
+            remConn = Players.PlayerRemoving:Connect(function(player)
+                dropConns(player)
+                clearEsp(player)
+            end)
+        end
+    elseif addConn then
+        addConn:Disconnect()
+        remConn:Disconnect()
+
+        addConn, remConn = nil, nil
+
+        for player in woahjConns do
+            dropConns(player)
+        end
+
+        for player in espData do
+            clearEsp(player)
+        end
+    end
+
+    -- TRACERS
+    if isOn and tracerOn and not lineConn then
+        lineConn = RS.RenderStepped:Connect(updateLines)
+    elseif not (isOn and tracerOn) and lineConn then
+        lineConn:Disconnect()
+        lineConn = nil
+    end
+
+    -- HIGHLIGHT UPDATE
+    if isOn and hlOn and not visibilityConn then
+        visibilityConn = RS.RenderStepped:Connect(updateHighlightVisibility)
+    elseif not (isOn and hlOn) and visibilityConn then
+        visibilityConn:Disconnect()
+        visibilityConn = nil
+    end
+
+    if isOn and hlOn then
+        updateHighlightVisibility()
+    end
+end
+
+--==================================================
+-- BUTTONS
+--==================================================
+
+toggleBtn.Activated:Connect(function()
+    isOn = not isOn
+    skin(toggleBtn, knob, isOn)
+    refresh()
+end)
+
+teamBtn.Activated:Connect(function()
+    teamOn = not teamOn
+    skin(teamBtn, teamKnob, teamOn)
+    woahj()
+end)
+
+hlBtn.Activated:Connect(function()
+    hlOn = not hlOn
+    skin(hlBtn, hlKnob, hlOn)
+    refresh()
+end)
+
+unBtn.Activated:Connect(function()
+    unOn = not unOn
+    skin(unBtn, unKnob, unOn)
+    refresh()
+end)
+
+tnBtn.Activated:Connect(function()
+    tnOn = not tnOn
+    skin(tnBtn, tnKnob, tnOn)
+    refresh()
+end)
+
+boxBtn.Activated:Connect(function()
+    boxOn = not boxOn
+    skin(boxBtn, boxKnob, boxOn)
+    refresh()
+end)
+
+trBtn.Activated:Connect(function()
+    tracerOn = not tracerOn
+    skin(trBtn, trKnob, tracerOn)
+    refresh()
+end)
+
+--==================================================
+-- TABS
+--==================================================
+
+tabMain.Activated:Connect(function()
+    showTab("main")
+end)
+
+tabSet.Activated:Connect(function()
+    showTab("settings")
+end)
+
+--==================================================
+-- MINIMIZE / CLOSE
+--==================================================
+
+minimizeBtn.Activated:Connect(function()
+    isOpen = not isOpen
+    content.Visible = isOpen
+
+    closePickers()
+
+    TS:Create(frame, fast, {
+        Size = isOpen and offset(190, sizes[curTab]) or offset(190, 30)
+    }):Play()
+end)
+
+closeBtn.Activated:Connect(function()
+    isOn = false
+    refresh()
+    closePickers()
+
+    if visibilityConn then
+        visibilityConn:Disconnect()
+        visibilityConn = nil
+    end
+
+    if lpTeamConn then
+        lpTeamConn:Disconnect()
+    end
+
+    moveConn:Disconnect()
+    endConn:Disconnect()
+
+    gui:Destroy()
+    tracerGui:Destroy()
+end)
+
+--==================================================
+-- WELCOME POPUP
+--==================================================
+
+okBtn.MouseEnter:Connect(function()
+    okBtn.BackgroundColor3 = rgb(48, 48, 54)
+end)
+
+okBtn.MouseLeave:Connect(function()
+    okBtn.BackgroundColor3 = rgb(35, 35, 40)
+end)
+
+okBtn.MouseButton1Click:Connect(function()
+    welcome:Destroy()
+    frame.Visible = true
+end)
+
+--==================================================
+-- DRAGGING
+--==================================================
+
+head.InputBegan:Connect(function(i)
+    if not isPress(i) then
+        return
+    end
+
+    local start = i.Position
+    local sp = frame.Position
+    local dragged = false
+
+    startDrag(i, function(m)
+        local d = m.Position - start
+
+        if not dragged and d.Magnitude >= 8 then
+            dragged = true
+        end
+
+        if dragged then
+            frame.Position = udim(
+                sp.X.Scale,
+                sp.X.Offset + d.X,
+                sp.Y.Scale,
+                sp.Y.Offset + d.Y
+            )
+        end
+    end)
+end)
+```
